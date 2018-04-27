@@ -1,0 +1,605 @@
+% Created 2018-04-22 Sun 12:21
+\documentclass[presentation]{beamer}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{fixltx2e}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage{float}
+\usepackage{wrapfig}
+\usepackage{rotating}
+\usepackage[normalem]{ulem}
+\usepackage{amsmath}
+\usepackage{textcomp}
+\usepackage{marvosym}
+\usepackage{wasysym}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\tolerance=1000
+\usepackage{tabu}
+\usepackage{minted}
+\usepackage[english]{babel}
+\hypersetup{pdfauthor="Vasilij Schneidermann", pdftitle="Knowing Just Enough Crypto to be Dangerous", colorlinks, linkcolor=black, urlcolor=blue}
+\setminted{fontsize=\footnotesize,escapeinside=||}
+\usetheme{Rochester}
+\usecolortheme[RGB={87,83,170}]{structure}
+\author{Vasilij Schneidermann}
+\date{April 2018}
+\title{Knowing Just Enough Crypto to be Dangerous}
+\hypersetup{
+  pdfkeywords={},
+  pdfsubject={},
+  pdfcreator={Emacs 25.3.1 (Org mode 8.2.10)}}
+\begin{document}
+
+\maketitle
+\begin{frame}{Outline}
+\tableofcontents
+\end{frame}
+
+\AtBeginSection{\frame{\sectionpage}}
+\definecolor{green}{HTML}{218A21}
+
+\section{Intro}
+\label{sec-1}
+
+\begin{frame}[label=sec-1-1]{About}
+\begin{itemize}
+\item Vasilij Schneidermann, 25
+\item Software developer at bevuta IT, Cologne
+\item mail@vasilij.de
+\item \url{https://github.com/wasamasa}
+\item \url{http://emacshorrors.com/}
+\item \url{http://emacsninja.com/}
+\end{itemize}
+\end{frame}
+
+\begin{frame}[label=sec-1-2]{Motivation}
+\begin{itemize}
+\item The current state of crypto is worrisome
+\item More attacks found than ever
+\item Rise in papers on side-channel attacks
+\item Yet: Most people ignore crypto or focus on a specific application
+(like, crypto currencies)
+\item How does one learn it?
+\item How hard can it be?
+\end{itemize}
+\end{frame}
+
+\begin{frame}[label=sec-1-3]{Context}
+
+\begin{itemize}
+\item Looking for programming challenges, most were boring
+\item Cryptopals challenges:
+\begin{itemize}
+\item Well designed, incremental
+\item Cover several fields (symmetric/asymmetric crypto, signing, PRNG,
+hashing, zero-knowledge proofs, protocols/handshakes)
+\item Programming language doesn't matter
+\item Can be completed offline
+\item You measure your own progress
+\end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}[label=sec-1-4]{Basics}
+\begin{itemize}
+\item Confidentiality, Integrity, Authenticity
+\item Symmetric and asymmetric cryptography
+\item Plaintext, ciphertext
+\item Key, IV, nonce
+\item Block and stream cipher modes
+\end{itemize}
+\end{frame}
+
+\section{Selected attacks}
+\label{sec-2}
+
+\begin{frame}[label=sec-2-1]{Candidates}
+\begin{itemize}
+\item Crack an MT19937 seed
+\item Single-byte XOR cipher
+\item CBC bitflipping attacks
+\item Break “random access read/write” AES CTR
+\item Compression Ratio Side-Channel Attacks
+\end{itemize}
+\end{frame}
+
+\begin{frame}[label=sec-2-2]{Crack an MT19937 seed}
+\begin{itemize}
+\item This one doesn't even involve crypto
+\item MT19937 is a very popular PRNG
+\item Some people use it for crypto\ldots{}
+\item Some people seed it from the current time\ldots{}
+\item Given a MT19937 output seeded with a UNIX timestamp from a few
+minutes ago, how do you figure out the seed?
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-3]{Crack an MT19937 seed}
+ \begin{minted}[]{scheme}
+(use extras posix (prefix random-mtzig mt19937:))
+
+(define (random-number seed)
+  (let ((rng (mt19937:init seed)))
+    (mt19937:random! rng)))
+
+(define now (inexact->exact (current-seconds)))
+(define then (- now 123))
+(define rng-output (random-number then))
+\end{minted}
+\end{frame}
+
+\begin{frame}[label=sec-2-4]{Crack an MT19937 seed}
+\begin{itemize}
+\item PRNG generates a specific sequence of numbers for a given seed
+\item If you use the same seed as for a previous run, you get the same numbers
+\item Idea: Try possible timestamps as seed values, check whether
+generated numbers match up
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-5]{Crack an MT19937 seed}
+ \begin{minted}[]{scheme}
+(define (crack-it starting-time rng-output)
+  (let loop ((seed starting-time))
+    (if (= (random-number seed) rng-output)
+        seed
+        (loop (sub1 seed)))))
+
+(printf "Predictable seed: ~a, output: ~a\n" then rng-output)
+(printf "Cracked seed: ~a\n" (crack-it now rng-output))
+\end{minted}
+\end{frame}
+
+\begin{frame}[label=sec-2-6]{Crack an MT19937 seed}
+\begin{itemize}
+\item Complexity: Negligible
+\item Workaround: Never seed with predictable data, use the CSPRNG your OS
+provides for seeding (good libraries will do that for you)
+\item Combining many different entropy sources (PID, number of cores,
+etc.) is a popular alternative, but not much better:
+\url{https://blog.cr.yp.to/20140205-entropy.html}
+\end{itemize}
+\end{frame}
+
+\begin{frame}[label=sec-2-7]{Single-byte XOR cipher}
+\begin{itemize}
+\item Equivalent of the caesar cipher, but with XOR instead of rotation
+\item XOR is reversible, $x \oplus y = z, z \oplus y = x, z \oplus x = y$
+\item Given a message in English with every byte XOR'd against a secret
+byte, figure out the message
+\end{itemize}
+\end{frame}
+
+\begin{frame}[label=sec-2-8]{Single-byte XOR cipher}
+\begin{itemize}
+\item We can do this by introducing a scoring function for a piece of text
+\item The more it looks like English, the higher the score
+\item Non-ASCII gives a failing score
+\item Use Chi-Squared test for comparing given to ideal distribution
+\item The decryption with the best score is the right one
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-9]{Single-byte XOR cipher}
+ \begin{minted}[]{scheme}
+(define (hexdecode string)
+  (map (cut string->number <> 16)
+       (string-chop string 2)))
+
+(define ciphertext
+  (hexdecode (string-append "48434248404e452b5868636e666e2b"
+                            "796e626c65782b787e7b796e666e")))
+
+(define (str bytes)
+  (list->string (map integer->char bytes)))
+
+(define (ascii? string)
+  (every (lambda (char) (<= 0 (char->integer char) 127))
+         (string->list string)))
+\end{minted}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-10]{Single-byte XOR cipher}
+ \begin{minted}[]{scheme}
+(define (xor-bytes-with-byte bytes byte)
+  (map (lambda (b) (bitwise-xor b byte)) bytes))
+
+(define english-histogram
+  (alist->hash-table
+   '((#\space . 0.14) (#\. . 0.09)
+     (#\e . 0.12) (#\t . 0.09) (#\a . 0.08)
+     (#\o . 0.07) (#\i . 0.06) (#\n . 0.06)
+     (#\s . 0.06) (#\h . 0.06) (#\r . 0.05)
+     (#\d . 0.04) (#\l . 0.04) (#\u . 0.02)
+     ;; ...
+     )))
+\end{minted}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-11]{Single-byte XOR cipher}
+ \begin{minted}[]{scheme}
+(define (frequencies string)
+  (let ((ht (make-hash-table))
+        (total (string-length string)))
+    (for-each (lambda (char)
+                (hash-table-update!/default ht char add1 0))
+              (string->list string))
+    (hash-table-walk ht (lambda (k v)
+                          (hash-table-set! ht k (/ v total))))
+    ht))
+\end{minted}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-12]{Single-byte XOR cipher}
+ \begin{minted}[]{scheme}
+(define (chi-squared hist1 hist2)
+  (hash-table-fold
+   hist1
+   (lambda (k v1 score)
+     (let ((v2 (hash-table-ref/default hist2 k 0)))
+       (if (zero? v1)
+           score
+           (+ score (/ (expt (- v1 v2) 2) v1)))))
+   0))
+\end{minted}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-13]{Single-byte XOR cipher}
+ \begin{minted}[]{scheme}
+(define (english-score string)
+  (if (ascii? string)
+      (let* ((input (string-downcase string))
+             (input (irregex-replace/all "[^ a-z]" input "."))
+             (hist (frequencies input))
+             (score (/ 1 (chi-squared english-histogram hist))))
+        (if (< (hash-table-ref/default hist #\. 0) 0.05)
+            (* score 2)
+            score))
+      0))
+\end{minted}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-14]{Single-byte XOR cipher}
+ \begin{minted}[]{scheme}
+(let loop ((byte 0)
+           (best-score 0)
+           (best-solution ""))
+  (if (< byte 256)
+      (let* ((solution (str (xor-bytes-with-byte ciphertext byte)))
+             (score (english-score solution)))
+        (if (> score best-score)
+            (loop (add1 byte) score solution)
+            (loop (add1 byte) best-score best-solution)))
+      (begin
+        (printf "Score: ~a\n" best-score)
+        (print best-solution))))
+\end{minted}
+\end{frame}
+
+\begin{frame}[label=sec-2-15]{Single-byte XOR cipher}
+\begin{itemize}
+\item Hardest part: Coming up with a usable scoring function
+\item Keys longer than a single byte can still be cracked with a similar
+approach
+\item Some broken cryptosystems revert to this difficulty level\ldots{}
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-16]{CBC bitflipping attacks}
+ \begin{itemize}
+\item Let's move on to actual crypto with AES
+\item ECB is broken, so this one uses CBC mode
+\item Suppose an attacker retrieved a cookie encrypted with AES-CBC,
+resembling \verb~comment=1234567890&uid=3~
+\item The attacker likes to modify the cookie to end in \verb~uid=0~ to become
+admin, however they can't just decrypt, modify and re-encrypt
+\item Watch what happens if they just modify the ciphertext and what the
+resulting plaintext is\ldots{}
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-17]{CBC bitflipping attacks}
+ Modification: XOR the first byte with a random byte
+
+\begin{minted}[]{text}
+regular:  |\textcolor{red}{636f6d6d656e743d3132333435363738}||\textcolor{blue}{39}|30267569643d33
+tampered: |\textcolor{red}{81436eafdd906ac37874635465fa81fb}||\textcolor{blue}{3a}|30267569643d33
+\end{minted}
+
+Result: First block is completely different, first byte of second
+block has been XOR'd with that random byte
+\end{frame}
+
+\begin{frame}[label=sec-2-18]{CBC bitflipping attacks}
+\begin{figure}[htb]
+\centering
+\includegraphics[width=.9\linewidth]{./img/cbc_decryption.png}
+\caption{Source: Wikipedia}
+\end{figure}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-19]{CBC bitflipping attacks}
+ \begin{minted}[]{scheme}
+(define key (random-bytes 16))
+(define iv (random-bytes 16))
+(define plaintext "comment=1234567890&uid=3")
+(define ciphertext
+  (aes-cbc-encrypt (pkcs7pad (bytes plaintext) 16) key iv))
+
+(define (check ciphertext)
+  (let* ((plaintext (str (pkcs7unpad (aes-cbc-decrypt ciphertext
+                     key iv))))
+         (params (form-urldecode plaintext))
+         (uid (alist-ref 'uid params)))
+    (printf "checking ~s...\n" plaintext)
+    (when (not uid)
+      (error "invalid string"))
+    (string->number uid)))
+\end{minted}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-20]{CBC bitflipping attacks}
+ \begin{minted}[]{scheme}
+;; existing byte is '3' and should become '0'
+(define tampered-byte (bitwise-xor (char->integer #\3)
+                                   (char->integer #\0)))
+(define tampered
+  ;; the uid is byte #8 of block #2, so manipulate it in block #1
+  (update-at (cut bitwise-xor <> tampered-byte) 7 ciphertext))
+
+(printf "regular UID: ~a\n" (check ciphertext))
+(printf "tampered UID: ~a\n" (check tampered))
+\end{minted}
+\end{frame}
+
+\begin{frame}[label=sec-2-21]{CBC bitflipping attacks}
+\begin{itemize}
+\item Other cipher modes have similar behavior (with CTR the same block is
+affected, no corruption of other blocks)
+\item Solution: Sign your cookies, verify the signature to ensure it
+hasn't been tampered with
+\item Weaker solution: Introduce a checksum to validate the integrity
+\item Alternative: Use cipher mode with integrated authentication (like
+AES-GCM)
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-22]{Break “random access read/write” AES CTR}
+ \begin{itemize}
+\item AES again, but this time with a stream cipher
+\item Suppose an attacker retrieves a message encrypted with AES-CTR
+\item The message originates from a web application that allows editing
+them and re-encrypts the result
+\item This re-encryption can be done efficiently thanks to CTR allowing
+you to “seek” into the keystream and allows you to patch in the
+changed portion of the text
+\item Luckily the attacker has access to \verb~(edit ciphertext offset   newtext)~ which returns the new ciphertext after editing
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-23]{Break “random access read/write” AES CTR}
+ \begin{minted}[]{scheme}
+(define key (random-bytes 16))
+(define nonce (random (expt 2 32)))
+(define ciphertext (aes-ctr-encrypt plaintext key nonce))
+
+(define (edit* ciphertext key nonce offset newtext)
+  (let* ((decrypted (aes-ctr-decrypt ciphertext key nonce))
+         (before (take decrypted offset))
+         (after (drop decrypted (+ offset (length newtext))))
+         (patched (append before newtext after)))
+    (aes-ctr-encrypt patched key nonce)))
+
+(define (edit ciphertext offset newtext)
+  (edit* ciphertext key nonce offset newtext))
+\end{minted}
+\end{frame}
+
+\begin{frame}[label=sec-2-24]{Break “random access read/write” AES CTR}
+\begin{figure}[htb]
+\centering
+\includegraphics[width=.9\linewidth]{./img/ctr_encryption.png}
+\caption{Source: Wikipedia}
+\end{figure}
+\end{frame}
+
+\begin{frame}[label=sec-2-25]{Break “random access read/write” AES CTR}
+\begin{itemize}
+\item The transformation is far simpler than CBC
+\item Unknown plaintext is XORed with an encrypted key stream depending on
+a nonce
+\item $P_u \oplus E(k, K, N)$
+\item If the attacker XORs a known ciphertext with the existing one,
+something interesting happens:
+\item $P_u \oplus E(k, K, N) \oplus P_k \oplus E(k, K, N) = P_u \oplus P_k$
+\item The attacker knows his own plaintext, but not the other one
+\item $P_u \oplus P_k \oplus P_k = P_u$
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-26]{Break “random access read/write” AES CTR}
+ \begin{minted}[]{scheme}
+(define (decrypt ciphertext)
+  (let* ((our-plaintext (random-bytes (length ciphertext)))
+         (our-ciphertext (edit ciphertext 0 our-plaintext)))
+    (xor-bytes
+     (xor-bytes ciphertext our-ciphertext)
+     our-plaintext)))
+
+(print (str (decrypt ciphertext)))
+\end{minted}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-27]{Break “random access read/write” AES CTR}
+ \begin{itemize}
+\item Bonus: The \texttt{edit} procedure allows a crypto-agnostic (slow) way to
+decrypt the message one byte at a time
+\item Suppose the attacker compares an edited ciphertext with the
+original, it will always be different
+\item However if the edit didn't change the content, both ciphertexts will
+be the same
+\item This can be used to guess part of the plaintext
+\item For a byte at a given offset, guess all possible values, one of them
+will reveal the plaintext byte
+\item Repeat for all possible offsets and join all found plaintext bytes
+\end{itemize}
+\end{frame}
+
+\begin{frame}[label=sec-2-28]{Break “random access read/write” AES CTR}
+\begin{itemize}
+\item Ultimately, this attack is enabled by nonce reuse, randomize the
+nonce and the keystreams no longer match up
+\item For the bonus one, it should be impossible to tell if a guess was
+successful or better, the resulting encryption result shouldn't be
+leaked
+\item Imagine if someone used this CTR property for something like FDE\ldots{}
+\end{itemize}
+\end{frame}
+
+\begin{frame}[label=sec-2-29]{Compression Ratio Side-Channel Attacks}
+\begin{itemize}
+\item This one is a side-channel attack and circumvents crypto
+\item Suppose the attacker is MITM and intercepts encrypted traffic
+resembling HTTP
+\item Additionally to that they can inject their own content (like, by
+changing the query to contain a search term)
+\item They know there's a cookie inside the header and want to guess it
+\item If the response is compressed before encryption, this can be done by
+checking the compressed size
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-30]{Compression Ratio Side-Channel Attacks}
+ \begin{itemize}
+\item Compression generally works by finding repeating subsequences and
+replacing these with something shorter
+\item Suppose we compress a string containing \verb~sessionid=abcdef~, a
+subsequent \verb~sessionid=a~ will result in better compression than a
+subsequent \verb~sessionid=b~
+\item Generally, the difference in reduction is measured in bits, but will
+often be enough to differ by a byte
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-31]{Compression Ratio Side-Channel Attacks}
+ \begin{minted}[]{scheme}
+(define (format-request input)
+  (format "POST / HTTP/1.1
+Host: example.com
+Cookie: sessionid=~a
+Content-Length: ~a
+~a
+" session-id (string-length input) input))
+
+(define (oracle input)
+  (let ((key (random-bytes 16))
+        (nonce (random (expt 2 32))))
+    (length (aes-ctr-encrypt (bytes (compress (format-request input)))
+                             key nonce))))
+\end{minted}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-32]{Compression Ratio Side-Channel Attacks}
+ \begin{minted}[]{text}
+POST / HTTP/1.1
+Host: example.com
+Cookie: |\textcolor{red}{sessionid=}|Q0hJQ0tFTiBTY2hlbWUgcmVpZ25zIHN1cHJlbWU
+Content-Length: 21
+|\textcolor{red}{sessionid=}|Pdu0Jaesh9n
+\end{minted}
+
+\begin{minted}[]{scheme}
+(oracle "sessionid=Pdu0Jaesh9n") ;=> 121
+\end{minted}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-33]{Compression Ratio Side-Channel Attacks}
+ \begin{minted}[]{text}
+POST / HTTP/1.1
+Host: example.com
+Cookie: |\textcolor{red}{sessionid=Q}|0hJQ0tFTiBTY2hlbWUgcmVpZ25zIHN1cHJlbWU
+Content-Length: 21
+|\textcolor{red}{sessionid=Q}|du0Jaesh9n
+\end{minted}
+
+\begin{minted}[]{scheme}
+(oracle "sessionid=Qdu0Jaesh9n") ;=> 120
+\end{minted}
+\end{frame}
+
+\begin{frame}[label=sec-2-34]{Compression Ratio Side-Channel Attacks}
+\begin{itemize}
+\item Try each byte and record the guesses
+\item A guess with a shorter compression size is likely to be correct
+\item Add the guessed byte to the list of known bytes
+\item If there's no good guess, either we've failed early or there's no
+more bytes to guess and we're done
+\item To avoid false positives, add uncompressable (random) junk
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile,label=sec-2-35]{Compression Ratio Side-Channel Attacks}
+ \begin{minted}[]{scheme}
+(define (guess-byte known)
+  (let ((guesses (make-hash-table))
+        ;; this improves our chances considerably
+        (suffix (random-bytes 10 from: 128 to: 256)))
+    (for-each (lambda (byte)
+                (let* ((guess (append known (list byte) suffix))
+                       (input (format "sessionid=~a" (str guess))))
+                  (hash-table-set! guesses byte (oracle input))))
+              charset)
+    (min-max-by cdr (hash-table->alist guesses))))
+
+(define (guess-bytes)
+  (let loop ((known '()))
+    (receive (min max) (guess-byte known)
+      (if (< (cdr min) (cdr max))
+          (let ((known (append known (list (car min)))))
+            (report-progress (str known) "guessed: ")
+            (loop known))
+          known))))
+\end{minted}
+\end{frame}
+
+\begin{frame}[label=sec-2-36]{Compression Ratio Side-Channel Attacks}
+\begin{itemize}
+\item This is a simplified version of actual attacks, like CRIME, BREACH,
+HEIST
+\item No real fix for this one (other than disabling compression)
+\item Other workarounds:
+\begin{itemize}
+\item Use crypto that pads to block sizes (like AES-CBC, easy to work
+around)
+\item Have the web server add random junk to the end (can be probably
+worked around with repeated guessing)
+\item Add padding that makes the length uniform (as suggested by an
+expired TLS RFC draft)
+\item Use XSRF tokens to mitigate the results of cookie stealing
+(good luck applying that to every web application\ldots{})
+\end{itemize}
+\end{itemize}
+\end{frame}
+
+\section{Outro}
+\label{sec-3}
+
+\begin{frame}[label=sec-3-1]{Summary}
+\begin{itemize}
+\item There's lots of crypto out there not involving hard math
+\item Good amount of well-understood attacks
+\item Side-channel attacks are scary and circumvent crypto
+\item Crypto systems aren't necessarily as safe as the primitives they
+consist of
+\item "Don't roll your own crypto" applies to primitives \alert{and}
+  cryptosystems
+\item You should totally do the cryptopals challenges
+\end{itemize}
+\end{frame}
+
+\begin{frame}[label=sec-3-2]{Questions?}
+\end{frame}
+% Emacs 25.3.1 (Org mode 8.2.10)
+\end{document}

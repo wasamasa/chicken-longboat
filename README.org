@@ -1,0 +1,5 @@
+* About
+
+Contains slides and code for a talk demonstrating that interesting
+attacks on crypto (as borrowed from [[https://www.cryptopals.com][the Cryptopals exercises]]) don't
+have to be hard.
